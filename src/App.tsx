@@ -4,14 +4,14 @@ import { Calendar as CalendarIcon, CheckCircle2, RotateCcw, Download, Upload, Ch
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 
 /**
- * Audax Interactive Planner — single-file React app
+ * Audax Interactive Planner — single-file React app (FINAL)
  * - Daily checklist from 2025-09-18 → 2025-11-23
  * - Based on plan v1.1 (VO2/dynamics from week 4)
  * - LocalStorage persistence + history log
  * - Move tasks/day across dates, mark done, export/import JSON
  * - Minimal month calendar + detailed daily view
- *
- * Tip: Click a date in the mini calendar to open the day. Use Export to back up your data.
+ * - Login gate (Supabase) — only robert@pego.cc
+ * - Sleep & Micro‑breaks metrics cards
  */
 
 // ---------- Types ----------
@@ -30,6 +30,13 @@ type DayPlan = {
   week: number;
   tasks: Task[];
   notes?: string;
+  // --- daily metrics ---
+  sleepHours?: number;  // ile spałeś (h)
+  napsNote?: string;    // opis drzemek
+  hrRest?: number;      // HR spoczynkowe
+  bodyMass?: number;    // masa (kg)
+  microDone?: number;   // zrobione mikro‑przerwy
+  microTarget?: number; // cel mikro‑przerw
 };
 
 type HistoryItem = {
@@ -231,8 +238,51 @@ function generateInitialPlan(): DayPlan[] {
       tasks = tasks.filter(t=>t.category!=="GYM");
     }
 
-    return { date: iso(d), phase, week: w, tasks, notes: "" };
+    return { date: iso(d), phase, week: w, tasks, notes: "", microDone: 0, microTarget: 10 };
   });
+}
+
+// --- New Cards (UI) ---
+function SleepCard({ dayPlan, setPlans }:{ dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>> }){
+  const setField = (patch: Partial<DayPlan>) => setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, ...patch})));
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-neutral-500">Sen (h)</span>
+          <input type="number" step={0.25} min={0} value={dayPlan.sleepHours ?? ''} onChange={(e)=>setField({ sleepHours: e.target.value===''? undefined : Number(e.target.value) })} className="border rounded-lg px-2 py-1" placeholder="np. 7.5"/>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-neutral-500">HR spocz.</span>
+          <input type="number" min={20} max={120} value={dayPlan.hrRest ?? ''} onChange={(e)=>setField({ hrRest: e.target.value===''? undefined : Number(e.target.value) })} className="border rounded-lg px-2 py-1" placeholder="np. 48"/>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-neutral-500">Masa (kg)</span>
+          <input type="number" step={0.1} min={0} value={dayPlan.bodyMass ?? ''} onChange={(e)=>setField({ bodyMass: e.target.value===''? undefined : Number(e.target.value) })} className="border rounded-lg px-2 py-1" placeholder="np. 73.4"/>
+        </label>
+        <label className="flex flex-col gap-1 sm:col-span-1 col-span-2">
+          <span className="text-xs text-neutral-500">Drzemki / opis</span>
+          <input type="text" value={dayPlan.napsNote ?? ''} onChange={(e)=>setField({ napsNote: e.target.value })} className="border rounded-lg px-2 py-1" placeholder="np. 20’ o 14:00"/>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function MicroBreaksCard({ dayPlan, setPlans }:{ dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>> }){
+  const target = dayPlan.microTarget ?? 10;
+  const done = dayPlan.microDone ?? 0;
+  const toggle = (idx:number)=>{ const newDone = idx < done ? idx : idx+1; setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, microDone: newDone}))); };
+  return (
+    <div className="space-y-2">
+      <div className="text-xs text-neutral-600">Cel na dziś: {target} mikro‑przerw (co 45–60 min, 2–4’)</div>
+      <div className="flex flex-wrap gap-1">
+        {Array.from({length: target}).map((_,i)=>{ const checked=i<done; return (
+          <button key={i} onClick={()=>toggle(i)} className={`w-5 h-5 rounded border text-[10px] flex items-center justify-center ${checked?'bg-neutral-900 text-white border-neutral-900':'bg-white'}`}>{checked?'✓':''}</button>
+        );})}
+      </div>
+    </div>
+  );
 }
 
 // ---------- App ----------
@@ -377,193 +427,4 @@ export default function App() {
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white rounded-2xl shadow p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><CalendarIcon className="w-5 h-5"/> Kalendarz</h2>
-              <div className="flex items-center gap-2">
-                <button className="p-2 rounded-xl hover:bg-neutral-100" onClick={()=>setMonthCursor(subMonths(monthCursor,1))}><ChevronLeft/></button>
-                <div className="text-sm font-medium w-40 text-center">{format(monthCursor, 'LLLL yyyy')}</div>
-                <button className="p-2 rounded-xl hover:bg-neutral-100" onClick={()=>setMonthCursor(addMonths(monthCursor,1))}><ChevronRight/></button>
-              </div>
-            </div>
-            <div className="grid grid-cols-7 text-xs text-neutral-500 mt-3">
-              {["Pn","Wt","Śr","Cz","Pt","So","Nd"].map(d=> <div key={d} className="text-center py-1">{d}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {gridDays.map(d=>{
-                const dateISO = iso(d);
-                const p = plans.find(x=>x.date===dateISO);
-                const comp = completion(p);
-                const selected = isSameDay(d, current);
-                const dim = !isSameMonth(d, monthCursor);
-                return (
-                  <button key={dateISO} onClick={()=>setCurrent(d)} className={
-                    `aspect-square rounded-xl p-1 flex flex-col items-center justify-center border ${(selected?'border-neutral-900':'border-neutral-200')} ${dim?'opacity-40':''} hover:shadow`}
-                  >
-                    <div className="text-sm font-semibold">{format(d,'d')}</div>
-                    <div className="text-[10px]">{p?`${comp}%`:''}</div>
-                  </button>
-                )
-              })}
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button className="px-3 py-2 bg-neutral-900 text-white rounded-xl shadow flex items-center gap-2" onClick={()=>setCurrent(new Date())}><MoveRight className="w-4 h-4"/> Dziś</button>
-              <button className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2" onClick={exportJSON}><Download className="w-4 h-4"/> Export</button>
-              <label className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2 cursor-pointer">
-                <Upload className="w-4 h-4"/> Import <input type="file" accept="application/json" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) importJSON(f); }}/>
-              </label>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className="text-lg font-semibold flex items-center gap-2"><History className="w-5 h-5"/> Historia</h2>
-            <div className="mt-2 max-h-80 overflow-auto text-sm space-y-1">
-              {history.length===0 && <div className="text-neutral-500">Brak wpisów</div>}
-              {history.slice(0,200).map((h,i)=> (
-                <div key={i} className="flex justify-between gap-2 border-b py-1">
-                  <div>
-                    <div className="font-medium">{h.action}</div>
-                    <div className="text-neutral-500">{h.detail}</div>
-                  </div>
-                  <div className="text-neutral-500">{format(new Date(h.ts), 'yyyy-MM-dd HH:mm')}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Main: Day detail */}
-        <div className="lg:col-span-2 space-y-4">
-          {dayPlan ? (
-            <div className="bg-white rounded-2xl shadow p-4">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div>
-                  <div className="text-xl font-bold">{dayPlan.date} — {dayNames[(new Date(dayPlan.date).getDay()+6)%7]}</div>
-                  <div className="text-sm text-neutral-600">Tydzień {dayPlan.week} • {dayPlan.phase}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-sm text-neutral-600">Ukończono: <b>{completion(dayPlan)}%</b></div>
-                  <button className="px-3 py-2 bg-neutral-900 text-white rounded-xl shadow flex items-center gap-2" onClick={()=>{
-                    // mark all done
-                    setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, tasks:p.tasks.map(t=>({...t,done:true}))})));
-                    setHistory(h=>[{ ts: Date.now(), date: dayPlan.date, action: "CHECK_ALL", detail: "wszystkie" }, ...h]);
-                  }}><ClipboardCheck className="w-4 h-4"/> Zaznacz wszystko</button>
-                  <button className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2" onClick={()=>resetDay(dayPlan.date)}><RotateCcw className="w-4 h-4"/> Reset dnia</button>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4 mt-4">
-                {(["GYM","BIKE","MOB","MICRO","HAND","NUTR","SLEEP"] as Task["category"][]).map(cat=>{
-                  const catTasks = dayPlan.tasks.filter(t=>t.category===cat);
-                  if (catTasks.length===0) return null;
-                  const titleMap: Record<Task["category"],string> = { GYM:"Siłownia / CORE", BIKE:"Rower", MOB:"Mobilność", MICRO:"Mikro‑przerwy", HAND:"Rehab dłoni", NUTR:"Żywienie / Meal‑prep", SLEEP:"Sen / Regeneracja" };
-                  return (
-                    <div key={cat} className="border rounded-2xl p-3">
-                      <div className="font-semibold mb-2">{titleMap[cat]}</div>
-                      <div className="space-y-2">
-                        {catTasks.map(t=> (
-                          <div key={t.id} className="flex items-start gap-2">
-                            <input type="checkbox" checked={t.done} onChange={(e)=>toggleTask(dayPlan.date, t.id, e.target.checked)} className="mt-1 w-4 h-4"/>
-                            <div className="flex-1">
-                              <div className="text-sm leading-snug flex items-start justify-between gap-2">
-                                <span>{t.label}</span>
-                                <TaskMenu
-                                  onMove={(to)=>moveTask(dayPlan.date, to, t.id)}
-                                  onDelete={()=>{ setPlans(prev=>prev.map(p=>p.date!==dayPlan.date?p:({...p,tasks:p.tasks.filter(x=>x.id!==t.id)}))); setHistory(h=>[{ ts: Date.now(), date: dayPlan.date, action: "DELETE_TASK", detail: t.label }, ...h]); }}
-                                />
-                              </div>
-                              {t.tips && t.tips.length>0 && (
-                                <ul className="text-xs text-neutral-500 list-disc ml-5 mt-1">
-                                  {t.tips.slice(0,2).map((tip,i)=>(<li key={i}>{tip}</li>))}
-                                </ul>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 border rounded-2xl p-3">
-                <div className="font-semibold mb-2">Przenieś cały dzień</div>
-                <DateMove toLabel="Przenieś dzień na…" onMove={(to)=>moveWholeDay(dayPlan.date, to)} />
-              </div>
-
-              <div className="mt-4">
-                <label className="block text-sm font-medium mb-1">Notatki / Ból (0–10) / RPE</label>
-                <textarea value={dayPlan.notes||""} onChange={(e)=>setPlans(prev=>prev.map(p=>p.date!==dayPlan.date?p:({...p, notes:e.target.value})))} className="w-full rounded-xl border p-3" rows={4} placeholder="Zapisz jak się czułeś, co poprawić, co zadziałało."/>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl shadow p-6 text-neutral-600">Wybierz dzień w kalendarzu…</div>
-          )}
-        </div>
-      </div>
-
-      <footer className="max-w-7xl mx-auto text-xs text-neutral-500 pt-6 pb-2">
-        Uwaga: unikaj NLPZ (np. meloksykam) podczas długich jazd/startu; pij wg pragnienia + elektrolity. • Dane zapisywane lokalnie w przeglądarce.
-      </footer>
-    </div>
-  );
-}
-
-function LoginScreen({ email, setEmail, onSignIn }:{ email:string; setEmail:(v:string)=>void; onSignIn:()=>void }){
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-4">
-      <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md">
-        <h1 className="text-xl font-bold mb-2">Audax Planner — logowanie</h1>
-        <p className="text-sm text-neutral-600 mb-4">Dostęp wyłącznie dla właściciela. Zaloguj się magic linkiem.</p>
-        <label className="block text-sm font-medium mb-1">E‑mail</label>
-        <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} className="w-full border rounded-xl px-3 py-2 mb-3" placeholder="robert@pego.cc"/>
-        <button onClick={onSignIn} className="w-full px-3 py-2 bg-neutral-900 text-white rounded-xl">Wyślij link logowania</button>
-        <p className="text-xs text-neutral-500 mt-3">Po kliknięciu linku w e‑mailu wrócisz do tej aplikacji zalogowany.</p>
-      </div>
-    </div>
-  );
-}
-
-function LockedScreen({ onSignOut, allowedEmail, currentEmail }:{ onSignOut:()=>void; allowedEmail:string; currentEmail:string }){
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-4">
-      <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
-        <h1 className="text-xl font-bold mb-2">Brak uprawnień</h1>
-        <p className="text-sm text-neutral-600">Ta aplikacja jest dostępna tylko dla <b>{allowedEmail}</b>.<br/>Zalogowano jako: {currentEmail}</p>
-        <button onClick={onSignOut} className="mt-4 px-3 py-2 bg-white border rounded-xl">Wyloguj</button>
-      </div>
-    </div>
-  );
-}
-
-function TaskMenu({ onMove, onDelete }:{ onMove:(isoDate:string)=>void; onDelete:()=>void }){
-  const [open, setOpen] = React.useState(false);
-  const [val, setVal] = useState(iso(new Date()));
-  return (
-    <div className="relative shrink-0">
-      <button aria-label="Więcej" className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500" onClick={()=>setOpen(v=>!v)}>
-        <MoreHorizontal className="w-4 h-4"/>
-      </button>
-      {open && (
-        <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border bg-white shadow-lg p-2 text-sm">
-          <div className="px-2 py-1.5 font-medium text-neutral-700">Akcje</div>
-          <div className="px-2 py-2 space-y-2 border-t">
-            <div className="flex items-center gap-2">
-              <input type="date" value={val} onChange={(e)=>setVal(e.target.value)} className="border rounded-lg p-1 text-xs w-full"/>
-              <button className="px-2 py-1 bg-neutral-900 text-white rounded-lg text-xs" onClick={()=>{ onMove(val); setOpen(false); }}>Przenieś</button>
-            </div>
-            <button className="w-full text-left text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg" onClick={()=>{ onDelete(); setOpen(false); }}>Usuń</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DateMove({ toLabel, onMove }: { toLabel: string; onMove: (isoDate: string)=>void }) {
-  const [val, setVal] = useState(iso(new Date()));
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      <input type="date" value={val} onChange={(e)=>setVal(e.target.value)} className="border rounded-lg p-1"/>
-      <button className="px-2 py-1 bg-neutral-900 text-white rounded-lg flex items-center gap-1" onClick={()=>onMove(val)}><MoveRight className="w-3 h-3"/> {toLabel}</button>
-    </div>
-  );
-}
+              <h2 className="text-lg font-semibold flex items
