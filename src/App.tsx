@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { addMonths, subMonths, format, addDays, eachDayOfInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameDay, isSameMonth, parseISO } from "date-fns";
-import { Calendar as CalendarIcon, CheckCircle2, RotateCcw, Download, Upload, ChevronLeft, ChevronRight, ClipboardCheck, History, Trash2, MoveRight, MoreHorizontal } from "lucide-react";
+import {
+  addMonths, subMonths, format, addDays, eachDayOfInterval,
+  startOfMonth, endOfMonth, startOfWeek, endOfWeek,
+  isSameDay, isSameMonth
+} from "date-fns";
+import {
+  Calendar as CalendarIcon, CheckCircle2, RotateCcw, Download, Upload,
+  ChevronLeft, ChevronRight, ClipboardCheck, History as HistoryIcon,
+  Trash2, MoveRight, MoreHorizontal
+} from "lucide-react";
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 
 /**
@@ -11,7 +19,7 @@ import { createClient, type Session, type User } from "@supabase/supabase-js";
  * - Move tasks/day across dates, mark done, export/import JSON
  * - Minimal month calendar + detailed daily view
  * - Login gate (Supabase) — only robert@pego.cc
- * - Sleep & Micro‑breaks metrics cards
+ * - Sleep & Micro-breaks metrics cards
  */
 
 // ---------- Types ----------
@@ -35,8 +43,8 @@ type DayPlan = {
   napsNote?: string;    // opis drzemek
   hrRest?: number;      // HR spoczynkowe
   bodyMass?: number;    // masa (kg)
-  microDone?: number;   // zrobione mikro‑przerwy
-  microTarget?: number; // cel mikro‑przerw
+  microDone?: number;   // zrobione mikro-przerwy
+  microTarget?: number; // cel mikro-przerw
 };
 
 type HistoryItem = {
@@ -65,14 +73,12 @@ const dayNames = ["Poniedziałek","Wtorek","Środa","Czwartek","Piątek","Sobota
 
 // Utility
 const iso = (d: Date) => d.toISOString().slice(0,10);
-const rng = (a:number,b:number)=>Array.from({length:b-a+1},(_,i)=>a+i);
 
-// ---------- Plan Generator (v1.1) ----------
+// ---------- Helpers for plan ----------
 
 function weekIndex(d: Date): number {
   return Math.floor((+d - +START)/ (1000*60*60*24) / 7) + 1;
 }
-
 function phaseName(week: number): string {
   if (week<=3) return "BASE (stabilizacja bólu)";
   if (week<=6) return "BUILD (VO2/dynamika + objętość)";
@@ -80,34 +86,34 @@ function phaseName(week: number): string {
   return "TAPER (zmniejszanie objętości)";
 }
 
-// Short tips used below
+// Short tips
 const TIPS: Record<string,string[]> = {
-  "McGill Big 3": ["Ból ≤3/10; kręgosłup neutralny.", "Curl‑up 3 s; side‑plank łokieć pod barkiem; bird‑dog 3 s zatrzymania."],
+  "McGill Big 3": ["Ból ≤3/10; kręgosłup neutralny.", "Curl-up 3 s; side-plank łokieć pod barkiem; bird-dog 3 s zatrzymania."],
   "Glute bridge": ["Pięty pod kolanami, żebra w dół.", "Pośladki mocno w górze 1–2 s."],
-  "Hip‑hinge drill": ["Kij: głowa‑plecy‑miednica w kontakcie.", "Ruch z bioder, nie z lędźwi."],
+  "Hip-hinge drill": ["Kij: głowa-plecy-miednica w kontakcie.", "Ruch z bioder, nie z lędźwi."],
   "Hamstring sliders": ["Ekscentryk 3–4 s.", "Biodra w linii, bez ciągnięcia lędźwiami."],
   "Pallof press": ["Napięty core, bez rotacji.", "Pauza 2–3 s na wyproście."],
-  "RDL": ["Zawias w biodrach, neutralny kręgosłup.", "Sztanga/KB blisko ciała; tempo 2‑0‑2."],
+  "RDL": ["Zawias w biodrach, neutralny kręgosłup.", "Sztanga/KB blisko ciała; tempo 2-0-2."],
   "Split squat": ["Kolano nad śródstopiem, miednica poziomo.", "Ciężar na pięcie/środstopiu, tułów lekko pochylony."],
-  "Trap‑bar deadlift": ["Łopatki w kieszenie, brzuch napięty.", "Wypychaj podłogę, nie ciągnij plecami."],
+  "Trap-bar deadlift": ["Łopatki w kieszenie, brzuch napięty.", "Wypychaj podłogę, nie ciągnij plecami."],
   "Wiosłowanie": ["Plecy neutralne, łokcie przez plecy.", "Pauza 1 s na szczycie ruchu."],
   "Dead bug": ["Lędźwie dociśnięte do podłoża.", "Wydech przy prostowaniu."],
-  "Side‑plank": ["Ciało w linii prostej.", "Miednica nie opada; równy oddech."],
+  "Side-plank": ["Ciało w linii prostej.", "Miednica nie opada; równy oddech."],
   "Z2 jazda": ["Możliwa rozmowa.", "Co 10’ wstań 10–20 s, zmieniaj chwyt."],
   "Tempo/technika": ["Stabilny tułów, patrz daleko.", "Prowadź rower biodrem; barki luźno."],
   "VO2max": ["110–120% FTP (Z5); kadencja 90–100.", "Pozycja stabilna, nie szarp."],
   "30/30": ["30 s mocno / 30 s lekko.", "Nie spal się w 1. serii."],
   "Sprinty": ["10–15 s z pełnego rozluźnienia.", "Maks bez kołysania, odpoczynek 3–5 min."],
-  "Over‑unders": ["Sekwencje pod/ponad progiem.", "Kontrola oddechu, pozycja stabilna."]
-}
+  "Over-unders": ["Sekwencje pod/ponad progiem.", "Kontrola oddechu, pozycja stabilna."]
+};
 
+// Generatory bloków
 function gymFor(week:number, dow:number): {label:string,tips?:string[]}[] {
-  // dow: 0=Mon..6=Sun — gym Mon/Wed/Fri
   if (![0,2,4].includes(dow)) return [];
   if (week<=3) return [
-    {label:"McGill Big 3 — curl‑up 3×8–10 (3 s), side‑plank 3×15–20 s/str., bird‑dog 3×6–8/str.", tips:TIPS["McGill Big 3"]},
+    {label:"McGill Big 3 — curl-up 3×8–10 (3 s), side-plank 3×15–20 s/str., bird-dog 3×6–8/str.", tips:TIPS["McGill Big 3"]},
     {label:"Glute bridge 3×12–15 (pauza 2 s)", tips:TIPS["Glute bridge"]},
-    {label:"Hip‑hinge drill 3×10", tips:TIPS["Hip‑hinge drill"]},
+    {label:"Hip-hinge drill 3×10", tips:TIPS["Hip-hinge drill"]},
     {label:"Hamstring sliders 3×8–10 (wolny ekscentryk)", tips:TIPS["Hamstring sliders"]},
     {label:"Pallof press 3×12/str.", tips:TIPS["Pallof press"]},
   ];
@@ -115,9 +121,9 @@ function gymFor(week:number, dow:number): {label:string,tips?:string[]}[] {
     {label:"RDL 4×6–8 (RPE 6–7)", tips:TIPS["RDL"]},
     {label:"Split squat 3×8/str.", tips:TIPS["Split squat"]},
     {label:"Wiosłowanie 3×10", tips:TIPS["Wiosłowanie"]},
-    {label:"Trap‑bar deadlift 3×5 (opc., ból ≤3/10)", tips:TIPS["Trap‑bar deadlift"]},
+    {label:"Trap-bar deadlift 3×5 (opc., ból ≤3/10)", tips:TIPS["Trap-bar deadlift"]},
     {label:"Dead bug 3×8/str.", tips:TIPS["Dead bug"]},
-    {label:"Side‑plank 3×25–30 s", tips:TIPS["Side‑plank"]},
+    {label:"Side-plank 3×25–30 s", tips:TIPS["Side-plank"]},
   ];
   if (week<=8) {
     if (dow===2) return [
@@ -133,12 +139,11 @@ function gymFor(week:number, dow:number): {label:string,tips?:string[]}[] {
   }
   return [
     {label:"Technika: lekkie RDL 2×5"},
-    {label:"Core 8–10’ McGill / anti‑rotacje (bez DOMS)"},
+    {label:"Core 8–10’ McGill / anti-rotacje (bez DOMS)"},
   ];
 }
 
 function bikeFor(week:number, dow:number): {label:string,tips?:string[]} | null {
-  // Tue/Thu/Sat rides; Sun sometimes; trainer feedback applied from week 4
   if (week<=3) {
     if (dow===1) return {label:"Z2 60–90’ + kadencja mieszana: 5×3’ 85–90 rpm / 5×3’ 70–75 rpm.", tips:TIPS["Z2 jazda"]};
     if (dow===3) return {label:"Z2 60–90’; co 10’ wstań 10–20 s.", tips:TIPS["Z2 jazda"]};
@@ -150,14 +155,14 @@ function bikeFor(week:number, dow:number): {label:string,tips?:string[]} | null 
     if (dow===1) return {label:"VO2max: 5×3’ @110–120% FTP (p. 3–4’) / alternatywa 2×(10×30/30)", tips:[...TIPS["VO2max"], ...TIPS["30/30"]]};
     if (dow===3) return {label:"Tempo/technika 60–90’ + 6–8×10–15 s sprintów (pełny odpoczynek)", tips:[...TIPS["Tempo/technika"], ...TIPS["Sprinty"]]};
     if (dow===5) return {label:"Z2 długi 3–4 h.", tips:TIPS["Z2 jazda"]};
-    if (dow===6) return {label:"Back‑to‑back: 2–3 h Z2 (jeśli sob. ≥3 h).", tips:TIPS["Z2 jazda"]};
+    if (dow===6) return {label:"Back-to-back: 2–3 h Z2 (jeśli sob. ≥3 h).", tips:TIPS["Z2 jazda"]};
     return null;
   }
   if (week<=8) {
-    if (dow===1) return {label:"Over‑unders: 3×10’ (2’ @95–100% / 30” @110–115%), p. 5’ (lub VO2 4×5’)", tips:TIPS["Over‑unders"]};
+    if (dow===1) return {label:"Over-unders: 3×10’ (2’ @95–100% / 30” @110–115%), p. 5’ (lub VO2 4×5’)", tips:TIPS["Over-unders"]};
     if (dow===3) return {label:"Nocny/świtny 2–3 h – test oświetlenia/ubioru; wstaw 10×15 s sprint.", tips:[...TIPS["Tempo/technika"], ...TIPS["Sprinty"]]};
     if (dow===5) return {label:"Długi 5–6 h; żywienie 60→90(100+) g/h.", tips:TIPS["Z2 jazda"]};
-    if (dow===6) return {label:"Back‑to‑back: 3–4 h Z2 (tydzień po długim).", tips:TIPS["Z2 jazda"]};
+    if (dow===6) return {label:"Back-to-back: 3–4 h Z2 (tydzień po długim).", tips:TIPS["Z2 jazda"]};
     return null;
   }
   // taper
@@ -171,15 +176,13 @@ function bikeFor(week:number, dow:number): {label:string,tips?:string[]} | null 
 function mobility(): string[] {
   return [
     "Zginacze biodra 2×45 s/str. (miednica podwinięta)",
-    "T‑spine na wałku + piersiowe 2×45 s",
+    "T-spine na wałku + piersiowe 2×45 s",
     "Oddech przeponowy 5 głębokich oddechów",
   ];
 }
-
 function microBreaks(): string[] {
-  return ["Mikro‑przerwy (co 45–60 min, 2–4’): □ □ □ □ □ □ □ □ □ □"];
+  return ["Mikro-przerwy (co 45–60 min, 2–4’): □ □ □ □ □ □ □ □ □ □"];
 }
-
 function handRehab(dow:number): string[] {
   if ([0,3,5].includes(dow)) return [
     "Nerwoglajding mediany 2×5–10 (bez bólu)",
@@ -188,7 +191,6 @@ function handRehab(dow:number): string[] {
   ];
   return ["Nerwoglajding mediany 1×5–10 (lekko)"];
 }
-
 function nutrition(week:number, dow:number, bike?:{label:string}|null): string[] {
   const bt = bike?.label||"";
   const long = bt.includes("5–6 h") || bt.includes("3–4 h");
@@ -200,7 +202,6 @@ function nutrition(week:number, dow:number, bike?:{label:string}|null): string[]
   const extra = (week===7||week===8) ? " Nitrany (burak) 400–800 mg NO₃⁻ 2–3 h przed kluczowym akcentem." : "";
   return [base+extra, "Meal prep: □ śniadanie  □ przekąski  □ obiad  □ kolacja  □ bidony/żele gotowe"];
 }
-
 function sleep(): string[] {
   return ["Sen 7.5–9 h", "Drzemka 20–30’ (opc.)", "HR spocz., masa, nastrój — odnotowane"];
 }
@@ -210,7 +211,7 @@ function generateInitialPlan(): DayPlan[] {
   return days.map((d) => {
     const w = weekIndex(d);
     const phase = phaseName(w);
-    const dow = d.getDay()===0?6:d.getDay()-1; // convert to 0=Mon..6=Sun
+    const dow = d.getDay()===0?6:d.getDay()-1;
     const gym = gymFor(w, dow);
     const bike = bikeFor(w, dow);
     const mob = mobility();
@@ -233,7 +234,6 @@ function generateInitialPlan(): DayPlan[] {
     nutr.forEach(n=>push(n, "NUTR"));
     slp.forEach(s=>push(s, "SLEEP"));
 
-    // Race day override
     if (isSameDay(d, RACE)) {
       tasks = tasks.filter(t=>t.category!=="GYM");
     }
@@ -242,9 +242,12 @@ function generateInitialPlan(): DayPlan[] {
   });
 }
 
-// --- New Cards (UI) ---
-function SleepCard({ dayPlan, setPlans }:{ dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>> }){
-  const setField = (patch: Partial<DayPlan>) => setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, ...patch})));
+// --- UI cards ---
+function SleepCard({ dayPlan, setPlans }:{
+  dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>>
+}) {
+  const setField = (patch: Partial<DayPlan>) =>
+    setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, ...patch})));
   return (
     <div className="space-y-2 text-sm">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -268,19 +271,65 @@ function SleepCard({ dayPlan, setPlans }:{ dayPlan: DayPlan; setPlans: React.Dis
     </div>
   );
 }
-
-function MicroBreaksCard({ dayPlan, setPlans }:{ dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>> }){
+function MicroBreaksCard({ dayPlan, setPlans }:{
+  dayPlan: DayPlan; setPlans: React.Dispatch<React.SetStateAction<DayPlan[]>>
+}) {
   const target = dayPlan.microTarget ?? 10;
   const done = dayPlan.microDone ?? 0;
-  const toggle = (idx:number)=>{ const newDone = idx < done ? idx : idx+1; setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, microDone: newDone}))); };
+  const toggle = (idx:number)=>{
+    const newDone = idx < done ? idx : idx+1;
+    setPlans(prev=>prev.map(p=>p.date!==dayPlan.date? p : ({...p, microDone: newDone})));
+  };
   return (
     <div className="space-y-2">
-      <div className="text-xs text-neutral-600">Cel na dziś: {target} mikro‑przerw (co 45–60 min, 2–4’)</div>
+      <div className="text-xs text-neutral-600">Cel na dziś: {target} mikro-przerw (co 45–60 min, 2–4’)</div>
       <div className="flex flex-wrap gap-1">
-        {Array.from({length: target}).map((_,i)=>{ const checked=i<done; return (
-          <button key={i} onClick={()=>toggle(i)} className={`w-5 h-5 rounded border text-[10px] flex items-center justify-center ${checked?'bg-neutral-900 text-white border-neutral-900':'bg-white'}`}>{checked?'✓':''}</button>
-        );})}
+        {Array.from({length: target}).map((_,i)=>{
+          const checked=i<done;
+          return (
+            <button key={i} onClick={()=>toggle(i)}
+              className={`w-5 h-5 rounded border text-[10px] flex items-center justify-center ${checked?'bg-neutral-900 text-white border-neutral-900':'bg-white'}`}
+              title={`Mikro-przerwa ${i+1}`}>
+              {checked?'✓':''}
+            </button>
+          );
+        })}
       </div>
+    </div>
+  );
+}
+
+// --- Small task menu (kebab) ---
+function TaskMenu({
+  onMove, onDelete
+}:{ onMove:(isoDate:string)=>void; onDelete:()=>void }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState(iso(new Date()));
+  return (
+    <div className="relative shrink-0">
+      <button aria-label="Więcej" className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500"
+        onClick={()=>setOpen(v=>!v)}>
+        <MoreHorizontal className="w-4 h-4"/>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border bg-white shadow-lg p-2 text-sm">
+          <div className="px-2 py-1.5 font-medium text-neutral-700">Akcje</div>
+          <div className="px-2 py-2 space-y-2 border-t">
+            <div className="flex items-center gap-2">
+              <input type="date" value={val} onChange={(e)=>setVal(e.target.value)}
+                     className="border rounded-lg p-1 text-xs w-full"/>
+              <button className="px-2 py-1 bg-neutral-900 text-white rounded-lg text-xs"
+                onClick={()=>{ onMove(val); setOpen(false); }}>
+                Przenieś
+              </button>
+            </div>
+            <button className="w-full text-left text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg"
+              onClick={()=>{ onDelete(); setOpen(false); }}>
+              Usuń
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -308,6 +357,7 @@ export default function App() {
   };
   const signOut = async ()=>{ if(supabase) await supabase.auth.signOut(); };
 
+  // --- Planner state ---
   const [plans, setPlans] = useState<DayPlan[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [current, setCurrent] = useState<Date>(START);
@@ -320,7 +370,6 @@ export default function App() {
     if (saved) setPlans(JSON.parse(saved)); else setPlans(generateInitialPlan());
     if (savedHistory) setHistory(JSON.parse(savedHistory));
   },[]);
-
   useEffect(()=>{ localStorage.setItem(STORAGE_KEY, JSON.stringify(plans)); }, [plans]);
   useEffect(()=>{ localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }, [history]);
 
@@ -341,12 +390,10 @@ export default function App() {
     }));
     setHistory(h=>[{ ts: Date.now(), date: dateISO, action: checked?"CHECK":"UNCHECK", detail: id }, ...h]);
   };
-
   const resetDay = (dateISO: string) => {
     setPlans(prev => prev.map(p => p.date!==dateISO ? p : ({...p, tasks: p.tasks.map(t=>({...t, done:false}))})));
     setHistory(h=>[{ ts: Date.now(), date: dateISO, action: "RESET_DAY", detail: "reset" }, ...h]);
   };
-
   const moveTask = (fromISO:string, toISO:string, id:string) => {
     if (fromISO===toISO) return;
     setPlans(prev => {
@@ -355,16 +402,13 @@ export default function App() {
       if (!src || !dst) return prev;
       const task = src.tasks.find(t=>t.id===id);
       if (!task) return prev;
-      // remove from src
       const newSrc = { ...src, tasks: src.tasks.filter(t=>t.id!==id) };
-      // add to dst with new id
       const newTask: Task = { ...task, id: `${toISO}_${task.category}_${Math.random().toString(36).slice(2,8)}` };
       const newDst = { ...dst, tasks: [...dst.tasks, newTask] };
       setHistory(h=>[{ ts: Date.now(), date: toISO, action: "MOVE_TASK", detail: `${task.label} ← ${fromISO}` }, ...h]);
       return prev.map(p => p.date===fromISO?newSrc : p.date===toISO?newDst : p);
     });
   };
-
   const moveWholeDay = (fromISO:string, toISO:string) => {
     if (fromISO===toISO) return;
     setPlans(prev => {
@@ -378,13 +422,11 @@ export default function App() {
       return prev.map(p => p.date===fromISO?newSrc : p.date===toISO?newDst : p);
     });
   };
-
   const completion = (p?:DayPlan) => {
     if (!p || p.tasks.length===0) return 0;
     const done = p.tasks.filter(t=>t.done).length;
     return Math.round(100*done/p.tasks.length);
   };
-
   const exportJSON = () => {
     const blob = new Blob([JSON.stringify({ plans, history }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -392,32 +434,22 @@ export default function App() {
     a.href = url; a.download = "audax_planner_v1_1.json"; a.click();
     URL.revokeObjectURL(url);
   };
-
   const importJSON = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const obj = JSON.parse(String(reader.result));
-        if (obj.plans && obj.history) {
-          setPlans(obj.plans); setHistory(obj.history);
-        } else if (Array.isArray(obj)) {
-          setPlans(obj);
-        }
-      } catch(e) { alert("Nieprawidłowy plik JSON"); }
+        if (obj.plans && obj.history) { setPlans(obj.plans); setHistory(obj.history); }
+        else if (Array.isArray(obj)) { setPlans(obj); }
+      } catch { alert("Nieprawidłowy plik JSON"); }
     };
     reader.readAsText(file);
   };
 
   // --- Access gate ---
-  if (!user) {
-    return (
-      <LoginScreen email={email} setEmail={setEmail} onSignIn={signIn} />
-    );
-  }
+  if (!user) { return <LoginScreen email={email} setEmail={setEmail} onSignIn={signIn} />; }
   if (user.email?.toLowerCase() !== ALLOWED_EMAIL) {
-    return (
-      <LockedScreen onSignOut={signOut} allowedEmail={ALLOWED_EMAIL} currentEmail={user.email||""} />
-    );
+    return <LockedScreen onSignOut={signOut} allowedEmail={ALLOWED_EMAIL} currentEmail={user.email||""} />;
   }
 
   return (
@@ -425,6 +457,203 @@ export default function App() {
       <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Sidebar: Month calendar & history */}
         <div className="lg:col-span-1 space-y-4">
+          {/* Mini calendar */}
           <div className="bg-white rounded-2xl shadow p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold flex items
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <CalendarIcon className="w-5 h-5"/> Kalendarz
+              </h2>
+              <div className="flex items-center gap-2">
+                <button className="p-1.5 rounded-lg hover:bg-neutral-100" onClick={()=>setMonthCursor(subMonths(monthCursor,1))}><ChevronLeft/></button>
+                <div className="text-sm font-medium w-36 text-center">{format(monthCursor, "LLLL yyyy")}</div>
+                <button className="p-1.5 rounded-lg hover:bg-neutral-100" onClick={()=>setMonthCursor(addMonths(monthCursor,1))}><ChevronRight/></button>
+              </div>
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-xs mt-3">
+              {["Pn","Wt","Śr","Cz","Pt","So","Nd"].map(d=>(
+                <div key={d} className="text-center text-neutral-500 py-1">{d}</div>
+              ))}
+              {gridDays.map(d=>{
+                const dISO = iso(d);
+                const isCur = isSameDay(d, current);
+                const inMonth = isSameMonth(d, monthCursor);
+                const p = plans.find(x=>x.date===dISO);
+                const prog = completion(p);
+                return (
+                  <button key={dISO}
+                    onClick={()=>{ setCurrent(d); }}
+                    className={`aspect-square rounded-xl p-1 flex flex-col items-center justify-center border ${isCur?'border-neutral-900':'border-transparent'} ${inMonth?'bg-white':'bg-neutral-100'}`}>
+                    <div className="text-xs">{format(d, "d")}</div>
+                    <div className="w-full h-1 rounded bg-neutral-200 mt-1">
+                      <div className="h-1 rounded bg-neutral-900" style={{width:`${prog}%`}}/>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* History */}
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <HistoryIcon className="w-5 h-5"/> Historia
+              </h2>
+              <button className="text-xs text-neutral-500 hover:underline" onClick={()=>setHistory([])}>Wyczyść</button>
+            </div>
+            <div className="mt-2 max-h-72 overflow-auto space-y-2 text-sm">
+              {history.length===0 && <div className="text-neutral-500 text-sm">Brak zdarzeń</div>}
+              {history.map((h,i)=>(
+                <div key={i} className="flex items-start gap-2">
+                  <div className="text-[11px] text-neutral-500">{new Date(h.ts).toLocaleString()}</div>
+                  <div className="flex-1">
+                    <div className="font-medium">{h.action}</div>
+                    <div className="text-neutral-600">{h.detail} — {h.date}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Export / Import */}
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <ClipboardCheck className="w-5 h-5"/> Narzędzia
+              </h2>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={exportJSON} className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2">
+                <Download className="w-4 h-4"/> Export
+              </button>
+              <label className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2 cursor-pointer">
+                <Upload className="w-4 h-4"/> Import
+                <input type="file" accept="application/json" className="hidden" onChange={(e)=>{ const f=e.target.files?.[0]; if (f) importJSON(f); e.currentTarget.value=""; }}/>
+              </label>
+              <button onClick={()=>{ if(dayPlan) resetDay(dayPlan.date); }}
+                      className="px-3 py-2 bg-white border rounded-xl shadow-sm flex items-center gap-2">
+                <RotateCcw className="w-4 h-4"/> Reset dnia
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Main day view */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="bg-white rounded-2xl shadow p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm text-neutral-500">{dayNames[new Date(currentISO).getDay()===0?6:new Date(currentISO).getDay()-1]}</div>
+                <h1 className="text-2xl font-bold">{format(new Date(currentISO), "d LLLL yyyy")}</h1>
+                <div className="text-sm text-neutral-600">{dayPlan?.phase} • tydzień {dayPlan?.week} • ukończone {completion(dayPlan)}%</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button className="px-3 py-2 bg-white border rounded-xl shadow-sm" onClick={()=>setCurrent(addDays(current,-1))}><ChevronLeft className="w-4 h-4"/></button>
+                <button className="px-3 py-2 bg-white border rounded-xl shadow-sm" onClick={()=>setCurrent(addDays(current,1))}><ChevronRight className="w-4 h-4"/></button>
+                {/* Move whole day */}
+                <div className="flex items-center gap-2 text-xs border rounded-xl p-2">
+                  <span>Przenieś dzień na</span>
+                  <input type="date" value={currentISO} onChange={(e)=>moveWholeDay(currentISO, e.target.value)} className="border rounded-lg p-1"/>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Categories */}
+            {dayPlan && (["GYM","BIKE","MOB","MICRO","HAND","NUTR","SLEEP"] as Task["category"][]).map(cat=>{
+              const catTasks = dayPlan.tasks.filter(t=>t.category===cat);
+              if (catTasks.length===0 && !["MICRO","SLEEP"].includes(cat)) return null;
+              const titleMap: Record<Task["category"],string> = {
+                GYM:"Siłownia / CORE", BIKE:"Rower", MOB:"Mobilność",
+                MICRO:"Mikro-przerwy", HAND:"Rehab dłoni", NUTR:"Żywienie / Meal-prep",
+                SLEEP:"Sen / Regeneracja"
+              };
+              return (
+                <div key={cat} className="border rounded-2xl p-3 bg-white shadow-sm">
+                  <div className="font-semibold mb-2">{titleMap[cat]}</div>
+
+                  {cat === "MICRO" ? (
+                    <MicroBreaksCard dayPlan={dayPlan} setPlans={setPlans} />
+                  ) : cat === "SLEEP" ? (
+                    <SleepCard dayPlan={dayPlan} setPlans={setPlans} />
+                  ) : (
+                    <div className="space-y-2">
+                      {catTasks.map(t=> (
+                        <div key={t.id} className="flex items-start gap-2">
+                          <input type="checkbox" checked={t.done}
+                            onChange={(e)=>toggleTask(dayPlan.date, t.id, e.target.checked)}
+                            className="mt-1 w-4 h-4"/>
+                          <div className="flex-1">
+                            <div className="text-sm leading-snug flex items-start justify-between gap-2">
+                              <span>{t.label}</span>
+                              <TaskMenu
+                                onMove={(to)=>moveTask(dayPlan.date, to, t.id)}
+                                onDelete={()=>{
+                                  setPlans(prev=>prev.map(p=>p.date!==dayPlan.date?p:({...p,tasks:p.tasks.filter(x=>x.id!==t.id)})));
+                                  setHistory(h=>[{ ts: Date.now(), date: dayPlan.date, action: "DELETE_TASK", detail: t.label }, ...h]);
+                                }}
+                              />
+                            </div>
+                            {t.tips && t.tips.length>0 && (
+                              <ul className="text-xs text-neutral-500 list-disc ml-5 mt-1">
+                                {t.tips.slice(0,2).map((tip,i)=>(<li key={i}>{tip}</li>))}
+                              </ul>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Auth screens ---
+function LoginScreen({ email, setEmail, onSignIn }:{
+  email:string; setEmail:(v:string)=>void; onSignIn:()=>void
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-4">
+      <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md">
+        <h1 className="text-xl font-bold mb-2">Audax Planner — logowanie</h1>
+        <p className="text-sm text-neutral-600 mb-4">
+          Dostęp wyłącznie dla właściciela. Zaloguj się magic linkiem.
+        </p>
+        <label className="block text-sm font-medium mb-1">E-mail</label>
+        <input type="email" value={email} onChange={(e)=>setEmail(e.target.value)}
+               className="w-full border rounded-xl px-3 py-2 mb-3" placeholder="robert@pego.cc"/>
+        <button onClick={onSignIn} className="w-full px-3 py-2 bg-neutral-900 text-white rounded-xl">
+          Wyślij link logowania
+        </button>
+        <p className="text-xs text-neutral-500 mt-3">
+          Po kliknięciu linku w e-mailu wrócisz do tej aplikacji zalogowany.
+        </p>
+      </div>
+    </div>
+  );
+}
+function LockedScreen({ onSignOut, allowedEmail, currentEmail }:{
+  onSignOut:()=>void; allowedEmail:string; currentEmail:string
+}) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-4">
+      <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
+        <h1 className="text-xl font-bold mb-2">Brak uprawnień</h1>
+        <p className="text-sm text-neutral-600">
+          Ta aplikacja jest dostępna tylko dla <b>{allowedEmail}</b>.<br/>
+          Zalogowano jako: {currentEmail}
+        </p>
+        <button onClick={onSignOut} className="mt-4 px-3 py-2 bg-white border rounded-xl">
+          Wyloguj
+        </button>
+      </div>
+    </div>
+  );
+}
