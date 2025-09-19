@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { addMonths, subMonths, format, addDays, eachDayOfInterval, startOfMonth, endOfMonth, startOfWeek, endOfWeek, isSameDay, isSameMonth, parseISO } from "date-fns";
-import { Calendar as CalendarIcon, CheckCircle2, RotateCcw, Download, Upload, ChevronLeft, ChevronRight, ClipboardCheck, History, Trash2, MoveRight } from "lucide-react";
+import { Calendar as CalendarIcon, CheckCircle2, RotateCcw, Download, Upload, ChevronLeft, ChevronRight, ClipboardCheck, History, Trash2, MoveRight, MoreHorizontal } from "lucide-react";
 import { createClient, type Session, type User } from "@supabase/supabase-js";
 
 /**
@@ -463,20 +463,18 @@ export default function App() {
                           <div key={t.id} className="flex items-start gap-2">
                             <input type="checkbox" checked={t.done} onChange={(e)=>toggleTask(dayPlan.date, t.id, e.target.checked)} className="mt-1 w-4 h-4"/>
                             <div className="flex-1">
-                              <div className="text-sm leading-snug">{t.label}</div>
+                              <div className="text-sm leading-snug flex items-start justify-between gap-2">
+                                <span>{t.label}</span>
+                                <TaskMenu
+                                  onMove={(to)=>moveTask(dayPlan.date, to, t.id)}
+                                  onDelete={()=>{ setPlans(prev=>prev.map(p=>p.date!==dayPlan.date?p:({...p,tasks:p.tasks.filter(x=>x.id!==t.id)}))); setHistory(h=>[{ ts: Date.now(), date: dayPlan.date, action: "DELETE_TASK", detail: t.label }, ...h]); }}
+                                />
+                              </div>
                               {t.tips && t.tips.length>0 && (
                                 <ul className="text-xs text-neutral-500 list-disc ml-5 mt-1">
                                   {t.tips.slice(0,2).map((tip,i)=>(<li key={i}>{tip}</li>))}
                                 </ul>
                               )}
-                              <div className="flex items-center gap-2 mt-1">
-                                <DateMove toLabel="Przenieś na…" onMove={(to)=>moveTask(dayPlan.date, to, t.id)} />
-                                <button className="text-xs text-red-600 hover:underline flex items-center gap-1" onClick={()=>{
-                                  // delete task
-                                  setPlans(prev=>prev.map(p=>p.date!==dayPlan.date?p:({...p,tasks:p.tasks.filter(x=>x.id!==t.id)})));
-                                  setHistory(h=>[{ ts: Date.now(), date: dayPlan.date, action: "DELETE_TASK", detail: t.label }, ...h]);
-                                }}><Trash2 className="w-3 h-3"/> usuń</button>
-                              </div>
                             </div>
                           </div>
                         ))}
@@ -532,6 +530,30 @@ function LockedScreen({ onSignOut, allowedEmail, currentEmail }:{ onSignOut:()=>
         <p className="text-sm text-neutral-600">Ta aplikacja jest dostępna tylko dla <b>{allowedEmail}</b>.<br/>Zalogowano jako: {currentEmail}</p>
         <button onClick={onSignOut} className="mt-4 px-3 py-2 bg-white border rounded-xl">Wyloguj</button>
       </div>
+    </div>
+  );
+}
+
+function TaskMenu({ onMove, onDelete }:{ onMove:(isoDate:string)=>void; onDelete:()=>void }){
+  const [open, setOpen] = React.useState(false);
+  const [val, setVal] = useState(iso(new Date()));
+  return (
+    <div className="relative shrink-0">
+      <button aria-label="Więcej" className="p-1 rounded-lg hover:bg-neutral-100 text-neutral-500" onClick={()=>setOpen(v=>!v)}>
+        <MoreHorizontal className="w-4 h-4"/>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border bg-white shadow-lg p-2 text-sm">
+          <div className="px-2 py-1.5 font-medium text-neutral-700">Akcje</div>
+          <div className="px-2 py-2 space-y-2 border-t">
+            <div className="flex items-center gap-2">
+              <input type="date" value={val} onChange={(e)=>setVal(e.target.value)} className="border rounded-lg p-1 text-xs w-full"/>
+              <button className="px-2 py-1 bg-neutral-900 text-white rounded-lg text-xs" onClick={()=>{ onMove(val); setOpen(false); }}>Przenieś</button>
+            </div>
+            <button className="w-full text-left text-red-600 hover:bg-red-50 px-2 py-1 rounded-lg" onClick={()=>{ onDelete(); setOpen(false); }}>Usuń</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
