@@ -1,6 +1,6 @@
 {
   "name": "audax-planner",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "vite",
@@ -8,6 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.46.1",
     "date-fns": "^3.6.0",
     "lucide-react": "^0.390.0",
     "react": "^18.3.1",

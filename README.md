@@ -1,36 +1,16 @@
-# Audax Planner
+# Audax Planner (Vercel + Supabase ready)
 
-Interaktywny planer przygotowań do zawodów **Audax Trail (23.11.2025)**
+## Szybki start
+1. Ustaw w Vercel zmienne:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON`
+2. Deploy (repo → Vercel). Projekt używa `vercel.json`, więc Vercel wykona `npm run build` i użyje `dist`.
 
-## Funkcje
-- Checklisty dzienne (siłownia, rower, mobilność, żywienie, sen)
-- Historia akcji
-- Przenoszenie zadań/dni
-- Export/Import JSON
-- (opcjonalnie) synchronizacja z Supabase
-
-## Uruchomienie lokalne
+## Lokalnie
 ```bash
 npm install
 npm run dev
 ```
 
-Aplikacja uruchomi się na [http://localhost:5173](http://localhost:5173)
-
-## Build produkcyjny
-```bash
-npm run build
-npm run preview
-```
-
-## Deploy na Vercel
-1. Wrzuć repozytorium na GitHub.
-2. Podłącz projekt w [Vercel](https://vercel.com).
-3. Ustaw:
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-4. Dodaj zmienne środowiskowe:
-   - `VITE_SUPABASE_URL` = `https://twoj-projekt.supabase.co`
-   - `VITE_SUPABASE_ANON` = Twój anon key
-
-Po wdrożeniu dostaniesz link w stylu `https://audax-planner.vercel.app`.
+## Notatka
+- W `package.json` dodano `@supabase/supabase-js` — wymagane, jeśli w `src/App.tsx` importujesz klienta Supabase.
